@@ -16,3 +16,8 @@ I am still figuring out the required length of each simulation however, the para
   - 2 for the backbone link.
   - 4 gateway nodes (2 for each autonomous system connected to opposite ends of the backbone link).
   - 24 end system nodes (6 connected to each gateway node).
+
+---
+# Topology
+This is a quick draw up of the topology I did in draw.io (just pretend that there are six end systems connected to each end router, couldn't reasonably fit them in the diagram):
+![Image of project topology](https://github.com/gollum18/cn2-project/blob/master/CN2%20Topology.png)
