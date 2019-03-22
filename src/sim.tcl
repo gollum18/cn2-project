@@ -77,6 +77,7 @@ for {set i 0} {$i < $gw_num} {incr i} {
         set r_cable expr {int(rand()*3)}
         set r_dsl expr {int(rand()*3)}
         # create the up/down streams for the dsl nodes
+        # todo: come up with appropriate delays, maybe randomize the link queue?
         if {$i == 0} {
             $ns simplex-link $dsl_nodes($i,$j) $dsl_gw($i) [lindex $dsl_bw_up $r_dsl]
             $ns simplex-link $dsl_gw($i) $dsl_nodes($i,$j) [lindex $dsl_bw_down $r_dsl]
