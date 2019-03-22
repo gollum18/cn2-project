@@ -8,7 +8,7 @@
 set sim_time 300
 
 # create a speed list
-set bw_list [list 1Gbs 10Gbs 25Gbs]
+set bw_list [list 1Gb 10Gb 25Gb]
 
 # create a algorithm list
 set alg_list [list "sfq" "codel" "drr" "fifo"]
