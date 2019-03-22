@@ -15,6 +15,14 @@ set gw_num 3
 # represents the number of end systems attached to each gateway
 set es_num 10
 
+# define lists for the cable down/up, dsl down/up, fiber down/up
+set cable_bw_down list 25Mb 50Mb 100Mb
+set cable_bw_up list 5Mb 10Mb 10Mb
+set dsl_bw_down list 6Mb 12Mb 24Mb
+set dsl_bw_up list 1Mb 1Mb 3Mb
+set fiber_bw_down list 300Mb 500Mb 1Gb
+set fiber_bw_up list 20Mb 30Mb 35Mb
+
 # create a simulator object
 set ns [new Simulator]
 
@@ -35,13 +43,13 @@ for {set i 0} {$i < 2} {incr i} {
 }
 
 # create the backbone link
-if {string compare $bb_alg "sfq"} {
+if {[string compare $bb_alg "sfq"] == 0} {
     set $bb_alg sfqCoDel
 } 
-elseif {string compare $bb_alg "codel"} {
+elseif {[string compare $bb_alg "codel"] == 0} {
     set $bb_alg CoDel
 } 
-elseif {string compare $bb_alg "drr"} {
+elseif {[string compare $bb_alg "drr"] == 0} {
     set $bb_alg DRR
 } 
 else {
@@ -50,19 +58,52 @@ else {
 $ns duplex-link $bb_dsl $bb_cable $bb_bw $bb_alg
 
 # create the dsl/cable gateways and their links
+# the gateway nodes will always use CoDel and be at 1Gbs
 for {set i 0} {$i < $gw_num} {incr i} {
     set dsl_gw($i) [$ns node]
     $ns duplex-link $bb_dsl $dsl_gw($i) 1Gbs CoDel
-
     set cable_gw($i) [$ns node]
     $ns duplex-link $bb_cable $cable_gw($i) 1Gbs CoDel
 }
 
 # create the dsl/cable nodes and their links
-for {set i 0} {$i < $gw_node} {incr i} {
+for {set i 0} {$i < $gw_num} {incr i} {
     for {set j 0} {$j < $es_num} {incr j} {
+        # create the dsl nodes
         set dsl_nodes($i,$j) [$ns node]
+        # create the cable nodes
         set cable_nodes($i,$j) [$ns node]
+        # generate a random speed for the up and down
+        set r_cable expr {int(rand()*3)}
+        set r_dsl expr {int(rand()*3)}
+        # create the up/down streams for the dsl nodes
+        if {$i == 0} {
+            $ns simplex-link $dsl_nodes($i,$j) $dsl_gw($i) [lindex $dsl_bw_up $r_dsl]
+            $ns simplex-link $dsl_gw($i) $dsl_nodes($i,$j) [lindex $dsl_bw_down $r_dsl]
+            $ns simplex-link $cable_nodes($i,$j) $cable_gw($i) [lindex $cable_bw_up $r_cable]
+            $ns simplex-link $cable_gw($i) $cable_nodes($i,$j) [lindex $cable_bw_down $r_cable]
+        }
+        elseif {$i == 1} {
+            if {rand() <= 0.5} {
+                $ns simplex-link $dsl_nodes($i,$j) $dsl_gw($i) [lindex $dsl_bw_up $r_dsl]
+                $ns simplex-link $dsl_gw($i) $dsl_nodes($i,$j) [lindex $dsl_bw_down $r_dsl]
+                $ns simplex-link $cable_nodes($i,$j) $cable_gw($i) [lindex $cable_bw_up $r_cable]
+                $ns simplex-link $cable_gw($i) $cable_nodes($i,$j) [lindex $cable_bw_down $r_cable]
+            } 
+            else {
+                $ns simplex-link $dsl_nodes($i,$j) $dsl_gw($i) [lindex $fiber_bw_up $r_dsl]
+                $ns simplex-link $dsl_gw($i) $dsl_nodes($i,$j) [lindex $fiber_bw_down $r_dsl]
+                $ns simplex-link $cable_nodes($i,$j) $cable_gw($i) [lindex $fiber_bw_up $r_cable]
+                $ns simplex-link $cable_gw($i) $cable_nodes($i,$j) [lindex $fiber_bw_down $r_cable]
+            }
+        }
+        # create the up/down streams for the cable nodes
+        else {
+            $ns simplex-link $dsl_nodes($i,$j) $dsl_gw($i) [lindex $fiber_bw_up $r_dsl]
+            $ns simplex-link $dsl_gw($i) $dsl_nodes($i,$j) [lindex $fiber_bw_down $r_dsl]
+            $ns simplex-link $cable_nodes($i,$j) $cable_gw($i) [lindex $fiber_bw_up $r_cable]
+            $ns simplex-link $cable_gw($i) $cable_nodes($i,$j) [lindex $fiber_bw_down $r_cable]
+        }
     }
 }
 
