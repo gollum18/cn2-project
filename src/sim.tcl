@@ -1,112 +1,136 @@
-# Name: sim.tcl
-# Created: March 20th, 2019
-# Author: Christen Ford
-# Purpose: To gather performance metrics on sfqCoDel, CoDel, DRR, and FIFO
-#  queueing algorithms.
+# returns a 'random' item from a list
+proc choice {items} {
+    return lindex $items expr {int(rand()*{llength items})}
+}
 
-# get the bb algorithm and speed, as well as the sim time
-set bb_alg [lindex $argv 0]
-set bb_bw [lindex $argv 1]
-set sim_time [lindex $argv 2]
+# determine a random delay within the range [min, max]
+proc delay {min max} {
+    # set the min to 1 if it is less than 1
+    if {$min < 0} {
+        set $min 0
+    }
+    # do the same for max
+    if {$max < 0} {
+        set $max 0
+    }
+    # invert min and max if the user gave a higher min than max value
+    if ($min > $max) {
+        set temp $min
+        set $min $max
+        set $max $temp
+    }
+    # check if they are equal, I don't want that
+    if ($min == $max) {
+        set $max expr {$max+1}
+    }
+    # taken from: http://code.activestate.com/recipes/186512-generating-random-intergers-within-a-range-of-max-/
+    return [expr int(rand()*($max-$min+1)) + $min] 
+}
 
-# setup some constants for use later (do not change these please!)
-# represents the number of gateway nodes
-set gw_num 3
-# represents the number of end systems attached to each gateway
-set es_num 10
+# make sure the user supplied bandwidth and a scheduler for the 
+# backbone link, print usage and error out if they did not
+if {$argc < 3} { 
+    puts "usage: ns sim.tcl \[bandwidth\] \[scheduler\] \[nodes\]"
+    exit -1
+}
 
-# define lists for the cable down/up, dsl down/up, fiber down/up
-set cable_bw_down list 25Mb 50Mb 100Mb
-set cable_bw_up list 5Mb 10Mb 10Mb
-set dsl_bw_down list 6Mb 12Mb 24Mb
-set dsl_bw_up list 1Mb 1Mb 3Mb
-set fiber_bw_down list 300Mb 500Mb 1Gb
-set fiber_bw_up list 20Mb 30Mb 35Mb
-
-# create a simulator object
+# create a new simulator
 set ns [new Simulator]
 
-# turn on general tracing
+# define three colors for the the different networks
+#   1 = dsl, 2 = cable, 3 = fiber
+$ns color 1 Blue
+$ns color 2 Red
+$ns Color 3 Green
 
-# define the finish operation
+# get the bandwidth and scheduler
+set bb_bw [lindex $argv 0]
+set bb_sched [lindex $argv 1]
+set num_nodes [lindex $argv 2]
+
+# create the directory for node trace output
+file mkdir ntrace
+
+# get the filename of this execution
+set tracefile [format "ntrace/%s_%s_%d.nam" $bb_bw $bb_sched $bb_nodes]
+
+# turn on tracing
+set nf [open $ntrace w]
+$ns namtrace-all $nf
+
+# define a finish operation
 proc finish {} {
-    global ns nf
+    global ns nf nq tracefile
     $ns flush-trace
+    # close the queue traces and NAM trace file
+    for {set i 0} {$i < [array size $nq]} {incr i} {
+        close $nq($i)
+    }
     close $nf
-    # todo: start the analysis script
+    # execute NAM and the analysis program
+    exec name $tracefile &
+    exec python3 analysis.py &
     exit 0
 }
 
+# create the link parameters
+set schedulers [list DropTail DRR CoDel sfqCoDel]
+
+# create the dsl parameters
+set dsl_up [list 1Mb 2.4Mb 2.4Mb]
+set dsl_down [list 8Mb 16Mb 24Mb]
+
+# create the cable parameters
+set cable_up [list 10Mb 15Mb 30Mb]
+set cable_down [list 50Mb 100Mb 300Mb]
+
+# create the fiber parameters
+set fiber_up [list 50Mb 100Mb]
+set fiber_down [list 300Mb 1Gb]
+
 # create the backbone nodes
-for {set i 0} {$i < 2} {incr i} {
-    set bb_nodes($i) [$ns node]
+set bb_dsl [$ns node]
+set bb_cable [$ns node]
+set bb_fiber [$ns node]
+
+# create the directory for queue trace output
+file mkdir qtrace
+
+# create the backbone links
+$ns duplex-link $bb_dsl $bb_cable $bb_bw 50ms $bb_sched
+$ns duplex-link $bb_dsl $bb_fiber $bb_bw 50ms $bb_sched
+$ns duplex-link $bb_cable $bb_fiber $bb_bw 50ms $bb_sched
+
+# turn on tracing on the backbone links
+
+# Note: end system links will just use the default linux scheduler, CoDel
+#   technically, Linux uses fq_codel by default, but I don't have it available
+#   While provider side of the link will use a random scheduler
+
+# TODO: determine the common delays for dsl, cable, and fiber links
+
+# create the dsl network
+for {set i 0} {$i < $num_nodes} {incr i} {
+    set dsl($i) [$ns node]
+    $ns simplex-link $dsl($i) $bb_dsl [choice $dsl_up] [delay ] [choice $schedulers]
+    $ns simplex-link $bb_dsl $dsl($i) [choice $dsl_down] [delay ] CoDel
 }
 
-# create the backbone link
-if {[string compare $bb_alg "sfq"] == 0} {
-    set $bb_alg sfqCoDel
-} 
-elseif {[string compare $bb_alg "codel"] == 0} {
-    set $bb_alg CoDel
-} 
-elseif {[string compare $bb_alg "drr"] == 0} {
-    set $bb_alg DRR
-} 
-else {
-    set $bb_alg DropTail
-}
-$ns duplex-link $bb_dsl $bb_cable $bb_bw $bb_alg
-
-# create the dsl/cable gateways and their links
-# the gateway nodes will always use CoDel and be at 1Gbs
-for {set i 0} {$i < $gw_num} {incr i} {
-    set dsl_gw($i) [$ns node]
-    $ns duplex-link $bb_dsl $dsl_gw($i) 1Gbs CoDel
-    set cable_gw($i) [$ns node]
-    $ns duplex-link $bb_cable $cable_gw($i) 1Gbs CoDel
+# create the cable network
+for {set i 0} {$i < $num_nodes} {incr i} {
+    set cable($i) [$ns node]
+    $ns simplex-link $cable($i) $bb_cable [choice $cable_up] [delay ] [choice $schedulers]
+    $ns simplex-link $bb_cable $cable($i) [choice $cable_down] [delay ] CoDel
 }
 
-# create the dsl/cable nodes and their links
-for {set i 0} {$i < $gw_num} {incr i} {
-    for {set j 0} {$j < $es_num} {incr j} {
-        # create the dsl nodes
-        set dsl_nodes($i,$j) [$ns node]
-        # create the cable nodes
-        set cable_nodes($i,$j) [$ns node]
-        # generate a random speed for the up and down
-        set r_cable expr {int(rand()*3)}
-        set r_dsl expr {int(rand()*3)}
-        # create the up/down streams for the dsl nodes
-        # todo: come up with appropriate delays, maybe randomize the link queue?
-        if {$i == 0} {
-            $ns simplex-link $dsl_nodes($i,$j) $dsl_gw($i) [lindex $dsl_bw_up $r_dsl]
-            $ns simplex-link $dsl_gw($i) $dsl_nodes($i,$j) [lindex $dsl_bw_down $r_dsl]
-            $ns simplex-link $cable_nodes($i,$j) $cable_gw($i) [lindex $cable_bw_up $r_cable]
-            $ns simplex-link $cable_gw($i) $cable_nodes($i,$j) [lindex $cable_bw_down $r_cable]
-        }
-        elseif {$i == 1} {
-            if {rand() <= 0.5} {
-                $ns simplex-link $dsl_nodes($i,$j) $dsl_gw($i) [lindex $dsl_bw_up $r_dsl]
-                $ns simplex-link $dsl_gw($i) $dsl_nodes($i,$j) [lindex $dsl_bw_down $r_dsl]
-                $ns simplex-link $cable_nodes($i,$j) $cable_gw($i) [lindex $cable_bw_up $r_cable]
-                $ns simplex-link $cable_gw($i) $cable_nodes($i,$j) [lindex $cable_bw_down $r_cable]
-            } 
-            else {
-                $ns simplex-link $dsl_nodes($i,$j) $dsl_gw($i) [lindex $fiber_bw_up $r_dsl]
-                $ns simplex-link $dsl_gw($i) $dsl_nodes($i,$j) [lindex $fiber_bw_down $r_dsl]
-                $ns simplex-link $cable_nodes($i,$j) $cable_gw($i) [lindex $fiber_bw_up $r_cable]
-                $ns simplex-link $cable_gw($i) $cable_nodes($i,$j) [lindex $fiber_bw_down $r_cable]
-            }
-        }
-        # create the up/down streams for the cable nodes
-        else {
-            $ns simplex-link $dsl_nodes($i,$j) $dsl_gw($i) [lindex $fiber_bw_up $r_dsl]
-            $ns simplex-link $dsl_gw($i) $dsl_nodes($i,$j) [lindex $fiber_bw_down $r_dsl]
-            $ns simplex-link $cable_nodes($i,$j) $cable_gw($i) [lindex $fiber_bw_up $r_cable]
-            $ns simplex-link $cable_gw($i) $cable_nodes($i,$j) [lindex $fiber_bw_down $r_cable]
-        }
-    }
+# create the fiber network
+for {set i 0} {$i < $num_nodes} {incr i} {
+    set fiber($i) [$ns node]
+    $ns simplex-link $fiber($i) $bb_fiber [choice $fiber_up] [delay ] [choice $schedulers]
+    $ns simplex-link $bb_fiber $fiber($i) [choice $fiber_down] [delay ] CoDel
 }
 
-# run the simluation
+# capture data for 300 sim seconds
+$ns at 300 "finish"
+
 $ns run
