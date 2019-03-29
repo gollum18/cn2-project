@@ -27,9 +27,10 @@
 #   nodes: The number of nodes on each provider network.
 #       note: Must be greater than or equal to 1.
 # The script runs for a predefined amount of time declared at the top of this script.
+# The point is to stress the queueing mechanisms at each backbone router
+#   This way we cann provide a useful analysis of them
 
 # List of things that need done still:
-# TODO: Make network generation a callable function so I don't have to repeat everything thrice.
 # TODO: Fiddle with the parameters on the agents so they aren't all the same.
 # TODO: Figure out a simulation time to generate files of sufficient size for analysis.
 # TODO: Aptly document each function in the script so people know what they do.
@@ -42,10 +43,12 @@ set sim_time 300
 
 # returns a 'random' item from a list
 proc choice {items} {
-    return lindex $items expr {int(rand()*{llength items})}
+    return [lindex $items [expr {int(rand()*[llength $items])}]]
 }
 
-# determine a random delay within the range [min, max]
+# Determine a random delay within the range [min, max]
+#   min: The minimum delay value
+#   max: The maximum delay value
 proc delay {min max} {
     # set the min to 1 if it is less than 1
     if {$min < 0} {
@@ -56,13 +59,13 @@ proc delay {min max} {
         set $max 0
     }
     # invert min and max if the user gave a higher min than max value
-    if ($min > $max) {
+    if {$min > $max} {
         set temp $min
         set $min $max
         set $max $temp
     }
     # check if they are equal, I don't want that
-    if ($min == $max) {
+    if {$min == $max} {
         set $max [expr $max+1]
     }
     # taken from: http://code.activestate.com/recipes/186512-generating-random-intergers-within-a-range-of-max-/
@@ -79,12 +82,6 @@ if {$argc < 3} {
 # create a new simulator
 set ns [new Simulator]
 
-# define three colors for the the different networks
-#   1 = dsl, 2 = cable, 3 = fiber
-$ns color 1 Blue
-$ns color 2 Red
-$ns Color 3 Green
-
 # get the bandwidth and scheduler
 set bb_bw [lindex $argv 0]
 set bb_sched [lindex $argv 1]
@@ -94,7 +91,7 @@ set num_nodes [lindex $argv 2]
 file mkdir ntrace
 
 # get the filename of this execution
-set tracefile [format "ntrace/%s_%s_%d.nam" $bb_bw $bb_sched $bb_nodes]
+set ntrace [format "ntrace/%s_%s_%d.nam" $bb_bw $bb_sched $num_nodes]
 
 # turn on tracing
 set nf [open $ntrace w]
@@ -102,21 +99,21 @@ $ns namtrace-all $nf
 
 # define a finish operation
 proc finish {} {
-    global ns nf nq tracefile
+    global ns nf ntrace
+    global dcmon dfmon cfmon
     $ns flush-trace
-    # close the queue traces and NAM trace file
-    for {set i 0} {$i < [array size $nq]} {incr i} {
-        close $nq($i)
-    }
+    # close the trace files
     close $nf
+    close $dcmon
+    close $dfmon
+    close $cfmon
     # execute NAM and the analysis program
-    exec name $tracefile &
     exec python3 analysis.py &
     exit 0
 }
 
 # create the link parameters
-set schedulers [list DropTail DRR CoDel sfqCoDel]
+set schedulers [list DropTail DRR CoDel]
 
 # create the dsl parameters
 set dsl_up [list 1Mb 2.4Mb 2.4Mb]
@@ -143,167 +140,120 @@ $ns duplex-link $bb_dsl $bb_cable $bb_bw 50ms $bb_sched
 $ns duplex-link $bb_dsl $bb_fiber $bb_bw 50ms $bb_sched
 $ns duplex-link $bb_cable $bb_fiber $bb_bw 50ms $bb_sched
 
+# setup the files for queue monitoring
+set dcmon [open [format "qtrace/dcmon_%s_%s_%d.out" $bb_bw $bb_sched $num_nodes] w]
+set dfmon [open [format "qtrace/dfmon_%s_%s_%d.out" $bb_bw $bb_sched $num_nodes] w]
+set cfmon [open [format "qtrace/cfmon_%s_%s_%d.out" $bb_bw $bb_sched $num_nodes] w]
+
 # setup queue monitoring on the links so we can get the average length
-$ns monitor-queue $bb_dsl $bb_cable
-$ns monitor-queue $bb_dsl $bb_fiber
-$ns monitor-queue $bb_cable $bb_fiber
-
-# turn on tracing on the backbone links
-$ns trace-queue $bb_dsl $bb_cable nq(0)
-$ns trace-queue $bb_dsl $bb_fiber nq(1)
-$ns trace-queue $bb_cable $bb_fiber nq(2)
-
-# Note: end system links will just use the default linux scheduler, CoDel
-#   technically, Linux uses fq_codel by default, but I don't have it available
-#   While provider side of the link will use a random scheduler
+$ns monitor-queue $bb_dsl $bb_cable $dcmon
+$ns monitor-queue $bb_dsl $bb_fiber $dfmon
+$ns monitor-queue $bb_cable $bb_fiber $cfmon 
 
 # create lists for tcp
-list tcp_agents []
-list tcp_traf []
-list tcp_sinks []
+set tcp_agents ""
+set tcp_traf ""
+set tcp_sinks ""
 # create lists for udp
-list udp_agents []
-list udp_traf []
-list udp_sinks []
+set udp_agents ""
+set udp_traf  ""
+set udp_sinks ""
 
-# note: packet size from all traffic sources is limited to 1500 bytees
+# Creates a network stored in the clients list that are all connected to 
+#   the indicated backbone node, with randomly chosen upload and download speeds from 
+#   the given bandwidth lists, as well as a random delay in the range of 
+#   [min_delay, max_delay]
+# Parameters:
+#   clients: A list to store the networks nodes in.
+#   bb_node: The node to connect the network to.
+#   bb_up: A list containing available uplink bandwidths.
+#   bb_down: A list containing available downlink bandwidths.
+#   min_delay: The minimum ddelay on a link.
+#   max_delay: The maximum delay on a link.
+proc create_network {clients bb_node bb_up bb_down min_delay max_delay} {
+    # Note: end system links will just use the default linux scheduler, CoDel
+    #   technically, Linux uses fq_codel by default, but I don't have it available
+
+    #   While provider side of the link will use a random scheduler
+    
+    global ns num_nodes schedulers
+    global tcp_agents tcp_traf tcp_sinks
+    global udp_agents udp_traf udp_sinks
+
+    # create a generic network based on the parameters
+    for {set i 0} {$i < $num_nodes} {incr i} {
+        # create each dsl node
+        set client [$ns node]
+        lappend $clients $client
+        set link_delay [delay $min_delay $max_delay]ms
+        $ns simplex-link $client $bb_node [choice $bb_up] $link_delay [choice $schedulers]
+        $ns simplex-link $bb_node $client [choice $bb_down] $link_delay CoDel
+        set p_agent rand()
+        set p_sink rand()
+        # bind an agent to the node
+        # create tcp traffic, want more tcp traffic than udp traffic
+        if {$p_agent <= 0.8} {
+            set agent [new Agent/TCPAgent]
+            $ns attach-agent $client $agent
+            lappend $tcp_agents $agent
+            # create a traffic generator
+            if {$p_sink <= 0.5} {
+                set traf [new Application/Traffic/Exponential]
+                $traf set packetSize_ 1500
+                $ns connect $agent $traf
+                lappend $tcp_traf $traf
+            } else {
+                set sink [new Agent/TCPSink]
+                $ns connect $agent $sink
+                lappend $tcp_sinks $sink
+            }
+        } else {
+            set agent [new Agent/UDP]
+            $ns attach-agent $client $agent
+            lappend $udp_agents $agent
+            # same thing, create a generator
+            if {$p_sink <= 0.5} {
+                set traf [new Application/Traffic/CBR]
+                $traf set packetSize_ 1500
+                $ns connect $agent $traf
+                lappend $udp_traf $traf
+            } else {
+                set sink [new Agent/Null]
+                $ns connect $agent $sink
+                lappend $udp_sinks $sink
+            }
+        }
+    }
+}
+
+# create lists to hold the client nodes
+set dsl_nodes ""
+set cable_nodes ""
+set fiber_nodes ""
 
 # create the dsl network
-for {set i 0} {$i < $num_nodes} {incr i} {
-    # create each dsl node
-    set dsl($i) [$ns node]
-    set link_delay [delay 50 250]ms
-    $ns simplex-link $dsl($i) $bb_dsl [choice $dsl_up] $link_delay [choice $schedulers]
-    $ns simplex-link $bb_dsl $dsl($i) [choice $dsl_down] $link_delay CoDel
-    set p_agent rand()
-    set p_sink rand()
-    # bind an agent to the node
-    # create tcp traffic, want more tcp traffic than udp traffic
-    if {$p_agent <= 0.8} {
-        set agent [new Agent/TCPAgent]
-        $ns attach-agent $dsl($i) $agent
-        lappend $tcp_agents $agent
-        # create a traffic generator
-        if {$p_sink <= 0.5} {
-            set $traf [new Application/Traffic/Exponential]
-            $traf attach-agent $agent
-            $traf set packetSize_ 1500
-            lappend $tcp_traf $traf
-        } 
-        # otherwise create a traffic sink
-        else {
-            set $sink [new Application/TCPSink]
-            $sink attach-agent $agent
-            lappend $tcp_sinks $sink
-        }
-    } 
-    # create udp traffic
-    else {
-        set agent [new Agent/UDP]
-        $ns attach-agent $dsl($i) $agent
-        lappend $udp_agents $agent
-        # same thing, create a generator
-        if {$p_sink <= 0.5} {
-            set $traf [new Application/Traffic/CBR]
-            $traf attach-agent $agent
-            $traf set packetSize_ 1500
-            lappend $udp_traf $traf
-        } 
-        # create a sink
-        else {
-            set $sink [new Application/Null]
-            $sink attach-agent $agent
-            lappend $udp_sinks $sink
-        }
-    }
-}
-
+create_network $dsl_nodes $bb_dsl $dsl_up $dsl_down 50 250
 # create the cable network
-for {set i 0} {$i < $num_nodes} {incr i} {
-    # create each cable node
-    set cable($i) [$ns node]
-    set link_delay [delay 25 150]ms
-    $ns simplex-link $cable($i) $bb_cable [choice $cable_up] $link_delay [choice $schedulers]
-    $ns simplex-link $bb_cable $cable($i) [choice $cable_down] $link_delay CoDel
-    set p_agent rand()
-    set p_sink rand()
-    # bind an agent to the node
-    if {$p_agent <= 0.8} {
-        set agent [new Agent/TCPAgent]
-        $ns attach-agent $cable($i) $agent
-        lappend $tcp_agents $agent
-        if {$p_sink <= 0.5} {
-            set $traf [new Application/Traffic/Exponential]
-            $traf attach-agent $agent
-            $traf set packetSize_ 1500
-            lappend $tcp_traf $traf
-        } 
-        else {
-            set $sink [new Application/TCPSink]
-            $sink attach-agent $agent
-            lappend $tcp_sinks $sink
-        }
-    } 
-    else {
-        set agent [new Agent/UDP]
-        $ns attach-agent $cable($i) $agent
-        lappend $udp_agents $agent
-        if {$p_sink <= 0.5} {
-            set $traf [new Application/Traffic/CBR]
-            $traf attach-agent $agent
-            $traf set packetSize_ 1500
-            lappend $udp_traf $traf
-        } 
-        else {
-            set $sink [new Application/Null]
-            $sink attach-agent $agent
-            lappend $udp_sinks $sink
-        }
-    }
+create_network $cable_nodes $bb_cable $cable_up $cable_down 25 150
+# create the fiber network
+create_network $fiber_nodes $bb_fiber $fiber_up $fiber_down 5 50
+
+# note traffic starts at a random time and runs for at least 5 seconds
+#   currenntly each traffic generator only generates traffic once
+
+# schedule tcp traffic
+for {set i 0} {$i < [llength $tcp_traf]} {incr i} {
+    set start [delay 0 295]
+    puts $start
+    $ns at $start "\[lindex $tcp_traf $i\] start"
+    $ns at [delay [expr {$start+5}] 300] "[lindex $tcp_traf $i] stop"
 }
 
-# create the fiber network
-for {set i 0} {$i < $num_nodes} {incr i} {
-    # create each fiber node
-    set fiber($i) [$ns node]
-    set link_delay [delay 5 50]ms
-    $ns simplex-link $fiber($i) $bb_fiber [choice $fiber_up] $link_delay [choice $schedulers]
-    $ns simplex-link $bb_fiber $fiber($i) [choice $fiber_down] $link_delay CoDel
-    set p_agent rand()
-    set p_sink rand()
-    # bind an agent to the node
-    if {$p_agent <= 0.8} {
-        set agent [new Agent/TCPAgent]
-        $ns attach-agent $fiber($i) $agent
-        lappend $tcp_agents $agent
-        if {$p_sink <= 0.5} {
-            set $traf [new Application/Traffic/Exponential]
-            $traf attach-agent $agent
-            $traf set packetSize_ 1500
-            lappend $tcp_traf $agent
-        } 
-        else {
-            set $sink [new Application/TCPSink]
-            $sink attach-agent $agent
-            lappend $tcp_sinks $sink
-        }
-    } 
-    else {
-        set agent [new Agent/UDP]
-        $ns attach-agent $fiber($i) $agent
-        lappend $udp_agents $agent
-        if {$p_sink <= 0.5} {
-            set $traf [new Application/Traffic/CBR]
-            $traf attach-agent $agent
-            $traf set packetSize_ 1500
-            lappend $udp_traf $traf
-        } 
-        else {
-            set $sink [new Application/Null]
-            $sink attach-agent $agent
-            lappend $udp_sinks $sink
-        }
-    }
+# schedule udp traffic
+for {set i 0} {$i < [llength $udp_traf]} {incr i} {
+    set start [delay 0 295]
+    $ns at $start "[lindex $udp_traf $i] start"
+    $ns at [delay [expr {$start+5}] 300] "[lindex $udp_traf $i] stop"
 }
 
 # capture data for 300 sim seconds

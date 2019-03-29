@@ -19,5 +19,8 @@ I am still figuring out the required length of each simulation however, the para
 
 ---
 # Topology
-This is a quick draw up of the topology I did in draw.io (just pretend that there are six end systems connected to each end router, couldn't reasonably fit them in the diagram):
-![Image of project topology](https://github.com/gollum18/cn2-project/blob/master/CN2%20Topology.png)
+I'm gonna stiick to describing the topology by hand. It has changed since I initially drew it up and I do not feel like drawing it up right now.
+
+Essentially what we have is a triangular linking of three backbone nodes where each node represents one of either a dsl, cable, or fiber provider. Client nodes connect directly to these nodes and communicate with each other using the backbone links that connect the backbone nodes. 
+
+Link dynamics are still an issue that I am considering handling.
