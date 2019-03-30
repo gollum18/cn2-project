@@ -1,5 +1,5 @@
 set bw_list [list 1Gb 3Gb 10Gb]
-set sched_list [list DropTail DRR CoDel]
+set sched_list [list DropTail DRR CoDel sfqCoDel]
 
 for {set i 0} {$i < [llength $bw_list]} {incr i} {
     for {set j 0} {$j < [llength $sched_list]} {incr j} {
