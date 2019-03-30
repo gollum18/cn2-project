@@ -1,0 +1,53 @@
+Note: Anything requiring UDP may be tricky, as I would have to implement (at the application layer) functionality for retransmission of lost/discarded packets, packet ordering, and packet integrity. Also Note: UDP is blocked by many service providers firewalls, making any project with UDP kind of tricky (may have to have a way to default to TCP if that is the case).
+
+Ideas for CN2 Project:
+
+- Measure the performance of fq_codel (the default Linux scheduler) when dealing with really small buffers and really large buffers with multiple simultaneous network heavy applications. Since Codel fights bufferbloat, maybe I can try to overload it?
+
+- Perform tests on the various schedulers in the Linux kernel (need to identify other popular scheduelers aside from Codel) and compare and contrast their performance in several different scenarios
+-- I could do this in NS2, or live using my machine
+
+- Build a semi-supervised packet classifier using WEKA, data from nlanr.net, and data captured from my own machine
+
+- Use unsupervised learning to classify network traffic flows
+
+- Create a library for compressing/decompressing TCP traffic at the application layer
+-- Compression may increase the throughput of the network since smaller packets will be sent (need to decide between lossy and lossless compression)
+-- I may actually use libhuffman in combination with TCP to send huffman encoded
+
+- Create a priority class round robin scheduler that utilizes machine learning to categorize traffic into the appropriate class
+
+- Implement LSTF (Least Slack Time First) in the Linux kernel and comparing its performance to fq-codel (the default Linux network scheduler)
+
+- Build a web crawler that maps (headlessly) the Internet through link following
+
+- Build an application that parses various log file formats and displays information on them
+
+- Build an application/library that allows for two-way encryption of a data flow from the application layer (may not be necessary because of TLS/SSL)
+
+- Do something with blockchain (maybe)?
+
+- Construct various scenarios for Google's QUIC algorithm (Web 3.0) and conduct performance analysis on it
+
+- Write a UDP based library for allowing multi-part simultaneous downloading of a single file from a client (that is, a UDP library for downloading a file in chunks rather than a single large file)
+
+- Create a library for sending data to and from clients using a raw socket (packets that do not use a transport layer protocol) Note: I may end up implementing transport-layer features into the library anyway
+
+- Design a library for reliable UDP transport
+
+- Design a protocol for maintaining synchronicity of file state between multiple servers (a protocol to ensure validation of server backups)
+
+- Design a protocol that allows for transparent downloading of a file from multiple servers as if the file were downloaded from a single server (centralized server that maintains state on which servers have the file and coordinates the downloading of the file from those servers) Note: Not sure I have the resources to implement this, would likely have to simulate in NS2, this sounds suspiciously like the Bittorrent protocol
+
+- One of the most commonly used link-state algorithms in computer networks is Dijkstras algorithm (which gives a list of all shortest paths from one node to another in a graph). Maybe we can utilize A* or some other planning algorithm to find a small set of shortest paths between any two nodes in a network?
+
+- Implement RRT to rapidly find a path between any two nodes in a computer network (it won't be an optimal path of any kind, but we can use it to guide A*s search)
+
+- Design a protocol/library that negotiates a connection for transferring a compressed data stream (or file, whatever) in blocks between any two clients
+-- The data stream would feed into a buffer until a prenegotiated block size is met
+-- The block would then be compressed, tagged with a sequence number (for reordering on the other side), then sent on its way
+-- The receiver would need to queue up blocks as they come in (based on the sequence number), this is needed so the receiver can rebuild the streamed object on the other side
+-- While I would like to use UDP for this library, I believe TCP would be the better option:
+--- This library is intended for large objects that get chunked (fragmented), compressed, and sent off
+--- The large quantity of chunks being sent would facilitate TCP (and maybe even multiple simultaneous TCP connections so we can send more than one chunk at once?)
+
