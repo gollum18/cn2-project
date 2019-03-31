@@ -39,8 +39,6 @@
 # TODO: Schedule traffic to start and stop at random intervals.
 # TODO: Maybe consider scheduling backbone link failures?
 
-set sim_time 1800
-
 # returns a 'random' item from a list
 proc choice {items} {
     return [lindex $items [expr {int(rand()*[llength $items])}]]
@@ -74,8 +72,8 @@ proc delay {min max} {
 
 # make sure the user supplied bandwidth and a scheduler for the 
 # backbone link, print usage and error out if they did not
-if {$argc < 3} { 
-    puts "usage: ns sim.tcl \[bandwidth\] \[scheduler\] \[nodes\]"
+if {$argc < 4} {
+    puts "usage: ns sim.tcl \[bandwidth\] \[scheduler\] \[nodes\] \[sim time (seconds)\] \[rounds\]"
     exit -1
 }
 
@@ -86,6 +84,8 @@ set ns [new Simulator]
 set bb_bw [lindex $argv 0]
 set bb_sched [lindex $argv 1]
 set num_nodes [lindex $argv 2]
+set sim_time [lindex $argv 3]
+set rounds [lindex $argv 4]
 
 # create the directory for node trace output
 file mkdir ntrace
@@ -146,9 +146,9 @@ set dfmon [open [format "qtrace/dfmon_%s_%s_%d.out" $bb_bw $bb_sched $num_nodes]
 set cfmon [open [format "qtrace/cfmon_%s_%s_%d.out" $bb_bw $bb_sched $num_nodes] w]
 
 # setup queue monitoring on the links so we can get the average length
-$ns monitor-queue $bb_dsl $bb_cable $dcmon
-$ns monitor-queue $bb_dsl $bb_fiber $dfmon
-$ns monitor-queue $bb_cable $bb_fiber $cfmon 
+$ns trace-queue $bb_dsl $bb_cable $dcmon
+$ns trace-queue $bb_dsl $bb_fiber $dfmon
+$ns trace-queue $bb_cable $bb_fiber $cfmon 
 
 # create lists for tcp
 set tcp_agents [list]
@@ -221,7 +221,15 @@ proc create_network {clients bb_node bb_up bb_down min_delay max_delay} {
                 lappend $udp_agents $agent
                 # generate a traffic generator and attach it to the agent
                 set traf [new Application/Traffic/CBR]
-                # TODO: Generate a random packet size and a random bit rate
+                # randomize packet size
+                $traf set packet_size_ delay 80 3250
+                # randomly enable dithering
+                #   dithering randomly enables and disables the sending 
+                #   of packets from the CBR generator during up time 
+                #   of the generator
+                if {rand() <= 0.5} {
+                    $traf set random_ 1
+                }
                 $traf attach-agent $agent
                 lappend udp_traf $traf
             } else {
@@ -253,21 +261,36 @@ set cable_lan [$ns make-lan $cable_nodes [choice $cable_down] [delay 25 150]ms L
 # create a lan for the fiber network
 set fiber_lan [$ns make-lan $fiber_nodes [choice $fiber_down] [delay 5 50]ms LL Queue/$bb_sched MAC/Csma/Cd Channel]
 
-# connect the tcp agents to their sinks, schedule them
-for {set i 0} {$i < [llength $tcp_agents]} {incr i} {
-    $ns connect [lindex $tcp_agents $i] [choice $tcp_sinks]
-    set start [delay 0 295]
-    $ns at $start [format "%s start" [lindex $tcp_traf $i]]
-    $ns at [delay [expr {$start+5}] 300] [format "%s stop" [lindex $tcp_traf $i]]
+# Randomly connects agents to sinks and schedules traffic for said
+# agents for n rounds. Currently agents generate traffic once per 
+# round.
+# Parameters:
+#   agents: A list of agents.
+#   sinks: A list of sinks.
+#   traf: A list containing traffic generators attached to agents.
+proc sched_traf {agents sinks traf} {
+    global ns rounds sim_time
+    # randomly attach agents to sinks
+    for {set i 0} {$i < [llength $agents]} {incr i} {
+        $ns connect [lindex $agents $i] [choice $sinks]
+    }
+    # schedule traffic for the given amount of rounds
+    set interval [expr {floor($sim_time/$rounds)}]
+    for {set i 0} {$i <= $rounds} {incr i} {
+        set p1 [expr {$i+1}]
+        set lower [expr {$interval*$i}]
+        set upper [expr {$interval*$p1}]
+        for {set j 0} {$j < [llength $agents]} {incr j} {
+            set start [delay $lower $upper]
+            $ns at $start [format "%s start" [lindex $traf $j]]
+            $ns at [delay [expr {$start+5}] $upper] [format "%s stop" [lindex $traf $i]]
+        }
+    }
 }
 
-# connect the udp agents to their sinks, schedule them
-for {set i 0} {$i < [llength $udp_agents]} {incr i} {
-    $ns connect [lindex $udp_agents $i] [choice $udp_sinks]
-    set start [delay 0 expr {$sim_time - 5}]
-    $ns at $start [format "%s start" [lindex $udp_traf $i]]
-    $ns at [delay [expr {$start+5}] $sim_time] [format "%s stop" [lindex $udp_traf $i]]
-}
+# schedule traffic for tcp and udp
+sched_traf $tcp_agents $tcp_sinks $tcp_traf 
+sched_traf $udp_agents $udp_sinks $udp_traf
 
 # capture data for 300 sim seconds
 $ns at $sim_time "finish"
