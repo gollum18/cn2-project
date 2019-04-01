@@ -1,0 +1,4 @@
+# ignore the trace file output
+#  II'd love to put it up, but can't it's too big
+ntrace/
+qtrace/
