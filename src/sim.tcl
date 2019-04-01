@@ -36,7 +36,6 @@
 # TODO: Aptly document each function in the script so people know what they do.
 # TODO: Demarcate sections of the script to make it easier to read.
 # TODO: Thoughroughly test this script.
-# TODO: Schedule traffic to start and stop at random intervals.
 # TODO: Maybe consider scheduling backbone link failures?
 
 # returns a 'random' item from a list
@@ -94,16 +93,17 @@ file mkdir ntrace
 set ntrace [format "ntrace/%s_%s_%d.nam" $bb_bw $bb_sched $num_nodes]
 
 # turn on tracing
-set nf [open $ntrace w]
-$ns namtrace-all $nf
+#set nf [open $ntrace w]
+#$ns namtrace-all $nf
 
 # define a finish operation
 proc finish {} {
-    global ns nf ntrace
+    global nf
+    global ns ntrace
     global dcmon dfmon cfmon
     $ns flush-trace
     # close the trace files
-    close $nf
+    #close $nf
     close $dcmon
     close $dfmon
     close $cfmon
@@ -254,12 +254,15 @@ create_network $cable_nodes $bb_cable $cable_up $cable_down 25 150
 # create the fiber network
 create_network $fiber_nodes $bb_fiber $fiber_up $fiber_down 5 50
 
+# create a lan for the backbone nodes
+#   TODO: For some reason this command throws an invalid command error for Mac/Csma/Cd
+#set bb_lan [$ns make-lan "$bb_dsl $bb_cable $bb_fiber" $bb_bw 50ms LL Queue/$bb_sched MAC/Csma/Cd]
 # create a lan for the dsl network
-set dsl_lan [$ns make-lan $dsl_nodes [choice $dsl_down] [delay 50 250]ms LL Queue/$bb_sched MAC/Csma/Cd Channel]
+set dsl_lan [$ns make-lan $dsl_nodes [choice $dsl_down] [delay 50 250]ms LL Queue/$bb_sched MAC/Csma/Cd]
 # create a lan for the cable network
-set cable_lan [$ns make-lan $cable_nodes [choice $cable_down] [delay 25 150]ms LL Queue/$bb_sched MAC/Csma/Cd Channel]
+set cable_lan [$ns make-lan $cable_nodes [choice $cable_down] [delay 25 150]ms LL Queue/$bb_sched MAC/Csma/Cd]
 # create a lan for the fiber network
-set fiber_lan [$ns make-lan $fiber_nodes [choice $fiber_down] [delay 5 50]ms LL Queue/$bb_sched MAC/Csma/Cd Channel]
+set fiber_lan [$ns make-lan $fiber_nodes [choice $fiber_down] [delay 5 50]ms LL Queue/$bb_sched MAC/Csma/Cd]
 
 # Randomly connects agents to sinks and schedules traffic for said
 # agents for n rounds. Currently agents generate traffic once per 
