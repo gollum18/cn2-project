@@ -5,7 +5,7 @@ if len(sys.argv) < 3:
     print('usage: python run.py [time] [rounds]')
     sys.exit(22)
 
-bw = ['100Mb', '500Mb', '1Gb']
+bw = ['1Mb', '10Mb', '25Mb']
 sched = ['DropTail', 'DRR', 'CoDel', 'sfqCoDel']
 delay = ['50ms', '250ms', '500ms', '1s']
 time = sys.argv[1]
