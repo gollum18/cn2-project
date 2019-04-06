@@ -21,19 +21,13 @@ set ns [new Simulator]
 $ns use-scheduler Heap
 
 # create the directories for trace and queue trace output
-file mkdir ntrace
 file mkdir qtrace
-
-# turn on tracing
-set nf [open [format "ntrace/%s_%s_%s.nam" $bb_bw $bb_delay $bb_sched] w]
-$ns namtrace-all $nf
 
 # define a finish operation
 proc finish {} {
-    global ns nf qm 
+    global ns qt
     $ns flush-trace
-    close $nf
-    close $qm
+    close $qt
     exit 0
 }
 
@@ -48,13 +42,11 @@ set bb_sink [$ns node]
 
 # create the backbone link
 $ns duplex-link $bb_carrier $bb_sink $bb_bw $bb_delay $bb_sched
-$ns queue-limit $bb_carrier $bb_sink 32
+$ns queue-limit $bb_carrier $bb_sink 10
 
-# setup the file for queue monitoring
-set qm [open [format "qtrace/%s_%s_%s.out" $bb_bw $bb_delay $bb_sched] w]
-
-# setup queue monitoring on the backbone link
-$ns trace-queue $bb_carrier $bb_sink $qm
+# turn on queue tracing for the link we care about
+set qt [open [format "qtrace/%s_%s_%s.tr" $bb_bw $bb_delay $bb_sched] w]
+$ns trace-queue $bb_carrier $bb_sink $qt
 
 # attach sinks to the server
 set sink [new Agent/TCPSink]
@@ -62,18 +54,13 @@ $ns attach-agent $bb_sink $sink
 set null [new Agent/Null]
 $ns attach-agent $bb_sink $null
 
-set bw_down [list 12Mb 30Mb 1Gb]
-set bw_up [list 1Mb 10Mb 300Mb]
-set delay [list 75ms 50ms 25ms]
-set sched [list DRR CoDel sfqCoDel]
-
 # create the traffic nodes
 for {set i 0} {$i < 3} {incr i} {
     # create the node
     set nodes($i) [$ns node]
         # link the node to the backbone carrier node
-        $ns simplex-link $bb_carrier $nodes($i) [lindex $bw_down $i] [lindex $delay $i] [lindex $sched $i]
-        $ns simplex-link $nodes($i) $bb_carrier [lindex $bw_up $i] [lindex $delay $i] [lindex $sched $i]       
+        $ns simplex-link $bb_carrier $nodes($i) [lindex $node_down $i] [lindex $node_delay $i] $bb_sched
+        $ns simplex-link $nodes($i) $bb_carrier [lindex $node_up $i] [lindex $node_delay $i] $bb_sched       
 }
 
 # packet size for the dsl, cable, and fiber links
@@ -83,7 +70,7 @@ set psize [list 1500 1500 3250]
 for {set i 0} {$i < 3} {incr i} {
     set tcp($i) [new Agent/TCP]
     $tcp($i) set packetSize_ [lindex $psize $i]
-    $tcp($i) set maxcwnd_ 32
+    $tcp($i) set maxcwnd_ 1024
     set udp($i) [new Agent/UDP]
     $udp($i) set packetSize [lindex $psize $i]
     # attach the agents to the node
@@ -146,10 +133,10 @@ for {set round 0} {$round < $rounds} {incr round} {
     set lower [expr {$interval*$round}]
     set upper [expr {$interval*[expr {$round+1}]}]
     for {set node 0} {$node < 3} {incr node} {
-        set type [expr {floor([rrange 0 1])}]
-        if {[expr {$type}] == 0} {
-            set traf [expr {floor([rrange 0 1])}]
-            if {[expr {$traf}] == 0} {
+        set rand [expr {rand()}]
+        if {$rand <= 0.725} {
+            set rand [expr {rand()}]
+            if {$rand <= 0.5} {
                 set times [traf_interval $lower $upper]
                 $ns at [lindex $times 0]s "$ftp($node) start"
                 $ns at [lindex $times 1]s "$ftp($node) stop"
