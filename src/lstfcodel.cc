@@ -255,8 +255,6 @@ Packet* LSTFCoDelQueue::deque()
         }
     }
     
-    
-    
     return (r.p);
 }
 
