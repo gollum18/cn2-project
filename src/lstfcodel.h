@@ -57,7 +57,6 @@ class LSTFCoDelQueue : public Queue {
     double interval_;       // width of moving time window over which to compute min
     double forgetfulness_;  // how much past slack times affect current dequeueing
     double lstf_weight_;    // the weight of lstf in dequeing calculations
-    double codel_weight_;   // the weight of codel in dequeing calculations
 
     // Dynamic state used by algorithm
     double first_above_time_; // when we went (or will go) continuously above

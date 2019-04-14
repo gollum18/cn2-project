@@ -122,7 +122,7 @@ double LSTFCoDelQueue::control_law(double t)
     //  delay experienced by the router over time
     // more investigation is needed to determine the best
     //  weighting between codel and lstf
-    double codel = codel_weight_ * 
+    double codel = (1 - lstf_weight_) * 
         (t + interval_ / sqrt(count_));
     double lstf = lstf_weight_ * slack_;
     return codel + lstf;
@@ -244,13 +244,16 @@ Packet* LSTFCoDelQueue::deque()
      * the delays experienced so far + the current dequeued
      * packets experienced delay
      *
-     * present delay should factor in more than previously 
-     * expreienced delays
-     *
-     * we need to determine if 2 is a proper divisor here
-     * maybe we can use interval_ or count_?
+     * slack is updated based on TCP EstimatedRTT 
+     * calculation, except the impact of current delay is
+     * configurable
      */
-    slack_ = ((1-forgetfulness_) * slack_ + d_exp_) / 2;
+    if (slack_ == 0) {
+      slack = d_exp_;
+    } else {
+      slack_ = 
+      (1-forgetfulness_) * slack_ + forgetfulness_ * d_exp_;
+    }
     
     return (r.p);
 }
