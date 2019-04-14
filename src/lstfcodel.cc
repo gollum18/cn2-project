@@ -72,10 +72,8 @@ LSTFCoDelQueue::LSTFCoDelQueue() : tchan_(0)
 {
     bind("forgetfulness_", &forgetfulness_);
     bind("lstf_weight_", &lstf_weight_);
-    bind("codel_weight_", &codel_weight_);
     bind("interval_", &interval_);
     bind("target_", &target_);  // target min delay in clock ticks
-    bind("slack_", &slack_);    // accumulated slack time
     bind("curq_", &curq_);      // current queue size in bytes
     bind("d_exp_", &d_exp_);    // current delay experienced in clock ticks
     q_ = new PacketQueue();     // underlying queue
@@ -85,7 +83,7 @@ LSTFCoDelQueue::LSTFCoDelQueue() : tchan_(0)
 
 void LSTFCoDelQueue::reset()
 {
-    slack_ = 0.;
+    slack_ = 0.5;
     curq_ = 0;
     d_exp_ = 0.;
     dropping_ = 0;
@@ -128,6 +126,21 @@ double LSTFCoDelQueue::control_law(double t)
     return codel + lstf;
 }
 
+/* slack is updated based on TCP EstimatedRTT 
+ * calculation, except the impact of current delay is
+ * configurable
+ */
+double LSTFCoDelQueue::update_slack(double t)
+{
+    // initialize slack to t if it zero
+    if (slack_ == 0) {
+      slack_ = t;
+    } else {
+      slack_ = 
+      (1-forgetfulness_) * slack_ + forgetfulness_ * t;
+    }
+}
+
 // Internal routine to dequeue a packet. All the delay and min tracking
 // is done here to make sure it's done consistently on every dequeue.
 dodequeResult LSTFCoDelQueue::dodeque()
@@ -160,6 +173,7 @@ dodequeResult LSTFCoDelQueue::dodeque()
 		// if still above at first_above_time, say it’s ok to drop
 	    // next 3 lines added by kmn (might better adjust count_ first?)
 	    if( (now - drop_next_) < 8*interval_ && count_ > 1) {
+	     update_slack(now);
 	     first_above_time_ = control_law(now);
 	    } else
                 first_above_time_ = now + interval_;
@@ -208,6 +222,7 @@ Packet* LSTFCoDelQueue::deque()
             } else {
                 // schedule the next drop.
 	        ++count_;	//kmn -  only count one drop
+	            update_slack(drop_next_);
 				//     moved from after drop(r.p) above
                 drop_next_ = control_law(drop_next_);
             }
@@ -240,20 +255,7 @@ Packet* LSTFCoDelQueue::deque()
         }
     }
     
-    /* router slack time is a decayed running average of 
-     * the delays experienced so far + the current dequeued
-     * packets experienced delay
-     *
-     * slack is updated based on TCP EstimatedRTT 
-     * calculation, except the impact of current delay is
-     * configurable
-     */
-    if (slack_ == 0) {
-      slack = d_exp_;
-    } else {
-      slack_ = 
-      (1-forgetfulness_) * slack_ + forgetfulness_ * d_exp_;
-    }
+    
     
     return (r.p);
 }

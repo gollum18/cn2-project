@@ -25,13 +25,11 @@ set d [$ns node]
 # these parameters are recommended by RFC 8289: CoDel
 Queue/LSTFCoDel set interval_ 100
 Queue/LSTFCoDel set target_ 5
-# forgetfulness needs more investigation for now we'll use 5%
-Queue/LSTFCoDel set forgetfulness_ .05
-# in order for lstf-codel to work right, these two must + to 1
-# note that if you do not set these at all LSTFCoDel will fail
-#   altogether, DONT DO THAT
-# setting codel weight to 1 nullifies lstf and vice versa
-Queue/LSTFCoDel set codel_weight .25
+# forgetfulness needs more investigation for now, lets try
+# with TCP's default value
+Queue/LSTFCoDel set forgetfulness_ .125
+# lstf_weight determines how much effect slack has on CoDel
+# 0 for no effect, 1 for full effect
 Queue/LSTFCoDel set lstf_weight_ .75
 
 # link the nodes, no need for high speed links we just want to stress test

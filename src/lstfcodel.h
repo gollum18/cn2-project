@@ -67,7 +67,7 @@ class LSTFCoDelQueue : public Queue {
     int dropping_;          // = 1 if in dropping state.
     int maxpacket_;         // largest packet we've seen so far (this should be
                             // the link's MTU but that's not available in NS)
-    double slack_; // accumulated slack time
+    double slack_;          // estimated slack time of the router
 
     // NS-specific junk
     int command(int argc, const char*const* argv);
@@ -81,6 +81,7 @@ class LSTFCoDelQueue : public Queue {
 
   private:
     double control_law(double);
+    double update_slack(double);
     dodequeResult dodeque();
 };
 
