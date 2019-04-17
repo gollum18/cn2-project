@@ -1,8 +1,8 @@
 /*
  * Codel - The Controlled-Delay Active Queue Management algorithm
  * Copyright (C) 2011-2012 Kathleen Nichols <nichols@pollere.com>
- * 
- * LSTFCoDel - The Least Slack Time First CoDel AQM algorithm
+ *
+ * LSTFCoDel - The Controlled-Delay Active Queue Management algorithm with priority queueing via Slack Time.
  * Copyright (C) 2019 Christen Ford <c.t.ford@vikes.csuohio.edu>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -34,9 +34,8 @@
  * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
- 
+
 #include <iostream>
-#include <map>
 #include <math.h>
 #include <sys/types.h>
 #include "config.h"
@@ -46,31 +45,29 @@
 #include "delay.h"
 #include "lstfcodel.h"
 
-using std::multimap;
-using std::pair;
-
 static class LSTFCoDelClass : public TclClass {
-    public:
-        LSTFCoDelClass() : TclClass("Queue/LSTFCoDel") {}
-        TclObject* create(int, const char*const*) {
-            return new (LSTFCoDelQueue);
-        }
-} class_lstf_codel;
+  public:
+    LSTFCoDelClass() : TclClass("Queue/LSTFCoDel") {}
+    TclObject* create(int, const char*const*) {
+        return (new LSTFCoDelQueue);
+    }
+} class_codel;
 
 LSTFCoDelQueue::LSTFCoDelQueue() : tchan_(0)
 {
+    bind("forgetfulness_", &forgetfulness_);
     bind("interval_", &interval_);
     bind("target_", &target_);  // target min delay in clock ticks
     bind("curq_", &curq_);      // current queue size in bytes
     bind("d_exp_", &d_exp_);    // current delay experienced in clock ticks
-    q_ = new PacketQueue();        // underlying queue
+    q_ = new PacketQueue();     // underlying queue
     pq_ = q_;
     reset();
 }
 
 void LSTFCoDelQueue::reset()
 {
-    avg_slack_ = 0;
+    avg_slack_ = interval_;
     curq_ = 0;
     d_exp_ = 0.;
     dropping_ = 0;
@@ -78,35 +75,44 @@ void LSTFCoDelQueue::reset()
     maxpacket_ = 256;
     count_ = 0;
     drop_next_ = 0;
+    while (sched_.size() > 0) {
+        sched_.erase(0);
+    }
     Queue::reset();
 }
 
-// enqueues a packet to the queue and list
-void LSTFCoDelQueue::enque(Packet* pkt) 
+// Add a new packet to the queue.  The packet is dropped if the maximum queue
+// size in pkts is exceeded. Otherwise just add a timestamp so dequeue can
+// compute the sojourn time (all the work is done in the deque).
+
+void LSTFCoDelQueue::enque(Packet* pkt)
 {
-    if (q_->length() >= qlim_) {
+    if(q_->length() >= qlim_) {
         // tail drop
         drop(pkt);
     } else {
         HDR_CMN(pkt)->ts_ = Scheduler::instance().clock();
-        q_->enque(pkt);
-        // insert into the deque_order maintainer
         add_packet(priority(), pkt);
-    }
+        q_->enque(pkt);
+    } 
 }
 
-// returns the time of the next drop relative to 't'
+// return the time of the next drop relative to 't'
 double LSTFCoDelQueue::control_law(double t)
 {
     return t + interval_ / sqrt(count_);
 }
 
-
-// determines the priority (slack time) for an item being inserted
-// slack time is determined as the average slack component + the delay experienced by the most recent packet with delay taking precedence
+// determine the priority in the queue
 double LSTFCoDelQueue::priority()
+{   
+    return avg_slack_;
+}
+
+// update the average slack time 
+void LSTFCoDelQueue::update_slack()
 {
-    return (1-forgetfulness_) * d_exp_ + forgetfulness_ * avg_slack_;
+    avg_slack_ =  max_delay_ + ((1 - forgetfulness_) * avg_slack_ + forgetfulness_ * drop_next_);
 }
 
 // Internal routine to dequeue a packet. All the delay and min tracking
@@ -116,12 +122,8 @@ dodequeResult LSTFCoDelQueue::dodeque()
     double now = Scheduler::instance().clock();
     dodequeResult r = { NULL, 0 };
 
-    // remove it from the queue
     r.p = get_packet();
-    // Note that the check here is unneccessary if we used a priority queue to back the queue in the first place
-    if (r.p!=NULL) {
-        q_->remove(r.p);
-    }
+    q_->remove(r.p);
     
     if (r.p == NULL) {
         curq_ = 0;
@@ -132,6 +134,9 @@ dodequeResult LSTFCoDelQueue::dodeque()
         // diagnostics and analysis.  d_exp_ is the sojourn time and curq_ is
         // the current q size in bytes.
         d_exp_ = now - HDR_CMN(r.p)->ts_;
+        if (d_exp_ > max_delay_) {
+            max_delay_ = d_exp_;
+        }
         curq_ = q_->byteLength();
 
         if (maxpacket_ < HDR_CMN(r.p)->size_)
@@ -166,9 +171,17 @@ dodequeResult LSTFCoDelQueue::dodeque()
 
 Packet* LSTFCoDelQueue::deque()
 {
+    // Had to put this in because NS requests a packet when the queue is empty?? Why??? -- Christen
+    if (length() == 0) {
+        return 0;
+    }
+    
+    // amortize max delay
+    max_delay_ = max_delay_ * 0.925;
+
     double now = Scheduler::instance().clock();;
     dodequeResult r = dodeque();
-
+    
     if (dropping_) {
         if (! r.ok_to_drop) {
             // sojourn time below target - leave dropping state
@@ -197,8 +210,6 @@ Packet* LSTFCoDelQueue::deque()
 	        ++count_;	//kmn -  only count one drop
 				//     moved from after drop(r.p) above
                 drop_next_ = control_law(drop_next_);
-                // update average slack
-                update_slack(drop_next_);
             }
         }
 
@@ -225,15 +236,12 @@ Packet* LSTFCoDelQueue::deque()
 	} else
 		count_ = 1;
         drop_next_ = control_law(now);
-        // update average slack
-        update_slack(drop_next_);
     }
+    
+    // update slack time
+    update_slack();
+    
     return (r.p);
-}
-
-void LSTFCoDelQueue::update_slack(double observed_delay)
-{
-    avg_slack_ = (1-forgetfulness_) * avg_slack_ + forgetfulness_ * observed_delay;
 }
 
 int LSTFCoDelQueue::command(int argc, const char*const* argv)
@@ -279,7 +287,7 @@ LSTFCoDelQueue::trace(TracedVar* v)
 
     if (((p = strstr(v->name(), "curq")) == NULL) &&
         ((p = strstr(v->name(), "d_exp")) == NULL) ) {
-        fprintf(stderr, "LSTFCoDel: unknown trace var %s\n", v->name());
+        fprintf(stderr, "CoDel: unknown trace var %s\n", v->name());
         return;
     }
     if (tchan_) {

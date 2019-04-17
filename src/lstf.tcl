@@ -1,3 +1,13 @@
+if {$argc < 2} {
+    puts "Usage: ns lstf.tcl \[forgetfulness\] \[run time (s)\]"
+    exit -1
+}
+
+puts $argv
+
+set forgetfulness [lindex $argv 0]
+set run_time [lindex $argv 1]
+
 # create a new simulator object
 set ns [new Simulator]
 
@@ -6,6 +16,7 @@ proc finish {} {
     global ns nf
     $ns flush-trace
     close $nf
+    puts "Simulation complete..."
     exit 0
 }
 
@@ -13,7 +24,8 @@ proc finish {} {
 file mkdir out
 
 # open the output file
-set nf [open out/lstf.tr w]
+set fpart [string replace $forgetfulness 0 1 ""]
+set nf [open [format "out/lstf_%d.tr" $fpart run_time] w]
 
 # create some nodes
 set a [$ns node]
@@ -27,7 +39,7 @@ Queue/LSTFCoDel set interval_ 100
 Queue/LSTFCoDel set target_ 5
 # forgetfulness needs more investigation for now, lets try
 # with TCP's default value
-Queue/LSTFCoDel set forgetfulness_ .125
+Queue/LSTFCoDel set forgetfulness_ $forgetfulness
 
 # link the nodes, no need for high speed links we just want to stress test
 # no drops here since we dont match or exceed c->d link bandwidth
@@ -77,7 +89,7 @@ $ns at 0 "$exp start"
 $ns at 0 "$cbr start"
 
 # schedule finish at 7 days sim time
-$ns at 604800 "finish"
+$ns at $run_time "finish"
 
 # run the simulation
 $ns run
