@@ -13,7 +13,7 @@ proc finish {} {
 file mkdir out
 
 # open the output file
-set nf [open out/lstf_c75_l25.tr w]
+set nf [open out/lstf.tr w]
 
 # create some nodes
 set a [$ns node]
@@ -28,14 +28,11 @@ Queue/LSTFCoDel set target_ 5
 # forgetfulness needs more investigation for now, lets try
 # with TCP's default value
 Queue/LSTFCoDel set forgetfulness_ .125
-# lstf_weight determines how much effect slack has on CoDel
-# 0 for no effect, 1 for full effect
-Queue/LSTFCoDel set lstf_weight_ .25
 
 # link the nodes, no need for high speed links we just want to stress test
 # no drops here since we dont match or exceed c->d link bandwidth
-$ns duplex-link $a $c 1.50Mb 25ms DropTail
-$ns duplex-link $b $c 1Mb 25ms DropTail
+$ns duplex-link $a $c 1.5Mb 25ms DropTail
+$ns duplex-link $b $c 1.5Mb 25ms DropTail
 $ns duplex-link $c $d 3Mb 50ms LSTFCoDel
 
 # trace the queue we are concerned about

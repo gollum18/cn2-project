@@ -1,6 +1,9 @@
 /*
  * Codel - The Controlled-Delay Active Queue Management algorithm
  * Copyright (C) 2011-2012 Kathleen Nichols <nichols@pollere.com>
+ * 
+ * LSTFCoDel - The Least Slack Time First CoDel AQM algorithm
+ * Copyright (C) 2019 Christen Ford <c.t.ford@vikes.csuohio.edu>
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions
@@ -32,57 +35,86 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#ifndef ns_lstf_codel_h
-#define ns_lstf_codel_h
+#ifndef ns_lstfcodel_h
+#define ns_lstfcodel_h
 
-#include "queue.h"
+// I really should just define a priority queue class for this, but this is fine for now. Just know that in actual implementation, LSTFCoDel uses a priority queue as its backing queue.
+#include <map>
 #include <stdlib.h>
 #include "agent.h"
 #include "template.h"
 #include "trace.h"
 
-// we need a multi-valued return and C doesn't want to do help
+using std::multimap;
+using std::pair;
+
+// used by CoDel when dequeing
 struct dodequeResult { Packet* p; int ok_to_drop; };
 
+/*
+ * Declares a CoDel-based queue that implements priority 
+ * dequeueing based on delay spent in multiplexer.
+ *
+ * Packets with the highest expected delay are dequeue first.
+ * Delay is computed and assigned to packets based on a 
+ * modified TCP EstimatedRTT calculation which includes 
+ * expected deque time as well as observed delay.
+ */
 class LSTFCoDelQueue : public Queue {
-  public:   
-    LSTFCoDelQueue();
-  protected:
-    // Stuff specific to the CoDel algorithm
-    void enque(Packet* pkt);
-    Packet* deque();
+    public: 
+        LSTFCoDelQueue();
+    protected: 
+        void enque(Packet* pkt);
+        Packet* deque();
+        
+        // static LSTF state
+        double forgetfulness_;
+        
+        // dynamic lstf state
+        double avg_slack_;          // the average expected deque time, updated every time a packet is dequeued
+        
+        // This is an ugly, ugly hack because I ran out of time to implement it properly. This would be unneccessary if I could figure out how to use NS's priority queue or build my own
+        multimap<double, Packet*> deque_order_; // used to track packet ordering for LSTF so we know which packet to deque next
+        
+        // static CoDel state
+        double target_;
+        double interval_;
+        
+        // dynamic CoDel state
+        double first_above_time_;
+        double drop_next_;          // the observed (or estimated) drop time, only updated when a drop actually occurs
+        int count_;
+        int dropping_;
+        int maxpacket_;
+        
+        // NS-specific junk
+        int command(int argc, const char*const* argv);
+        void reset();
+        void trace(TracedVar*); // routine to write trace records
 
-    // Static state (user supplied parameters)
-    double target_;         // target queue size (in time, same units as clock)
-    double interval_;       // width of moving time window over which to compute min
-    double forgetfulness_;  // how much past slack times affect current dequeueing
-    double lstf_weight_;    // the weight of lstf in dequeing calculations
-
-    // Dynamic state used by algorithm
-    double first_above_time_; // when we went (or will go) continuously above
-                              // target for interval
-    double drop_next_;      // time to drop next packet (or when we dropped last)
-    int count_;             // how many drops we've done since the last time
-                            // we entered dropping state.
-    int dropping_;          // = 1 if in dropping state.
-    int maxpacket_;         // largest packet we've seen so far (this should be
-                            // the link's MTU but that's not available in NS)
-    double slack_;          // estimated slack time of the router
-
-    // NS-specific junk
-    int command(int argc, const char*const* argv);
-    void reset();
-    void trace(TracedVar*); // routine to write trace records
-
-    PacketQueue *q_;        // underlying FIFO queue
-    Tcl_Channel tchan_;     // place to write trace records
-    TracedInt curq_;        // current qlen seen by arrivals
-    TracedDouble d_exp_;    // delay seen by most recently dequeued packet
-
-  private:
-    double control_law(double);
-    double update_slack(double);
-    dodequeResult dodeque();
+        PacketQueue *q_;           // underlying DropTail queue
+        Tcl_Channel tchan_;     // place to write trace records
+        TracedInt curq_;        // current qlen seen by arrivals
+        TracedDouble d_exp_;    // delay seen by most recently
+    private:
+        void add_packet(double pri, Packet* pkt) {
+            deque_order_.insert(pair<double, Packet*>(pri, pkt));
+        }
+        double control_law(double);
+        dodequeResult dodeque();
+        Packet* get_packet() {
+            // this should never be the case
+            if (deque_order_.empty()) {
+                return NULL;
+            }
+            // get the first element in the iterator
+            // hopefully this doesnt blow up, we'll see
+            pair<double, Packet*> entry = (*(deque_order_.begin()));
+            deque_order_.erase(0);
+            return entry.second;
+        }
+        double priority();
+        void update_slack(double);
 };
 
 #endif
