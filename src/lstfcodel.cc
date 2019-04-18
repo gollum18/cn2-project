@@ -2,7 +2,7 @@
  * Codel - The Controlled-Delay Active Queue Management algorithm
  * Copyright (C) 2011-2012 Kathleen Nichols <nichols@pollere.com>
  *
- * LSTFCoDel - The Controlled-Delay Active Queue Management algorithm with priority queueing via Slack Time.
+ * LSTFCoDel - The Controlled-Delay Active Queue Management algorithm [RFC 8289, Nichols. et al.] with (hackish) priority queueing via Slack Time.
  * Copyright (C) 2019 Christen Ford <c.t.ford@vikes.csuohio.edu>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -104,15 +104,21 @@ double LSTFCoDelQueue::control_law(double t)
 }
 
 // determine the priority in the queue
+// priority is given to packets with the highest expected delay
 double LSTFCoDelQueue::priority()
 {   
-    return avg_slack_;
+    if (avg_slack_ == 0) {
+        return 0;
+    } else {
+        return 1.0 / avg_slack_;
+    }
 }
 
 // update the average slack time 
 void LSTFCoDelQueue::update_slack()
 {
     avg_slack_ =  max_delay_ + ((1 - forgetfulness_) * avg_slack_ + forgetfulness_ * drop_next_);
+    drop_next_ = 0;
 }
 
 // Internal routine to dequeue a packet. All the delay and min tracking
