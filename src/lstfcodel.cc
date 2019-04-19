@@ -2,7 +2,8 @@
  * Codel - The Controlled-Delay Active Queue Management algorithm
  * Copyright (C) 2011-2012 Kathleen Nichols <nichols@pollere.com>
  *
- * LSTFCoDel - The Controlled-Delay Active Queue Management algorithm [RFC 8289, Nichols. et al.] with (hackish) priority queueing via Slack Time.
+ * LSTFCoDel - The Least Slack Time First Priotized Controlled-Delay 
+ * Active Queue Management algorithm
  * Copyright (C) 2019 Christen Ford <c.t.ford@vikes.csuohio.edu>
  *
  * Redistribution and use in source and binary forms, with or without
@@ -35,7 +36,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-#include <iostream>
 #include <math.h>
 #include <sys/types.h>
 #include "config.h"
@@ -45,18 +45,22 @@
 #include "delay.h"
 #include "lstfcodel.h"
 
+// defines an LSTFCoDelQueue as derived TclClass
 static class LSTFCoDelClass : public TclClass {
   public:
+    // empty constructor for creating instances of the LSTFCoDelClass from its TCL counterpart
     LSTFCoDelClass() : TclClass("Queue/LSTFCoDel") {}
+    // returns a new instance of the LSTFCoDelClass its corresponding TCL object LSTFCoDelQueue
     TclObject* create(int, const char*const*) {
         return (new LSTFCoDelQueue);
     }
 } class_codel;
 
+// creates an instance of an LSTFCoDel queue
 LSTFCoDelQueue::LSTFCoDelQueue() : tchan_(0)
 {
-    bind("forgetfulness_", &forgetfulness_);
-    bind("interval_", &interval_);
+    bind("forgetfulness_", &forgetfulness_);    // weighting factor used to determine how much influence past congestion has on incoming packets
+    bind("interval_", &interval_);              // target interval CoDel aims for
     bind("target_", &target_);  // target min delay in clock ticks
     bind("curq_", &curq_);      // current queue size in bytes
     bind("d_exp_", &d_exp_);    // current delay experienced in clock ticks
@@ -67,6 +71,7 @@ LSTFCoDelQueue::LSTFCoDelQueue() : tchan_(0)
 
 void LSTFCoDelQueue::reset()
 {
+    // initialize average slack to CoDels interval, not sure if this is what we want, but it seems to be working ok
     avg_slack_ = interval_;
     curq_ = 0;
     d_exp_ = 0.;
@@ -87,12 +92,17 @@ void LSTFCoDelQueue::reset()
 
 void LSTFCoDelQueue::enque(Packet* pkt)
 {
+    // drop the incoming packet if the queue is full
     if(q_->length() >= qlim_) {
-        // tail drop
         drop(pkt);
     } else {
+        // update the packets timestamp
         HDR_CMN(pkt)->ts_ = Scheduler::instance().clock();
+        // add the packet to the multimap with the calculated priority per my paper -> priority is irrelevant of the packet
+        // priority is purely determined from what is going on with congestion in the router, it is not derived from any fields in the packet
+        // e.g. no special treatment of packets!!
         add_packet(priority(), pkt);
+        // throw the packet into the backing FIFO queue
         q_->enque(pkt);
     } 
 }
@@ -100,24 +110,29 @@ void LSTFCoDelQueue::enque(Packet* pkt)
 // return the time of the next drop relative to 't'
 double LSTFCoDelQueue::control_law(double t)
 {
+    // this calculation is derived from a paper referenced in RFC 8289
+    //   according to said paper, this calculation attempts to maximize power efficiency of the router
     return t + interval_ / sqrt(count_);
 }
 
 // determine the priority in the queue
-// priority is given to packets with the highest expected delay
 double LSTFCoDelQueue::priority()
 {   
+    // determine a packets priority in the queue per my paper
     if (avg_slack_ == 0) {
         return 0;
     } else {
-        return 1.0 / avg_slack_;
+        return 1.0 / (1.0 + avg_slack_);
     }
 }
 
 // update the average slack time 
 void LSTFCoDelQueue::update_slack()
 {
+    // calculate the average slack value as stated in my paper
     avg_slack_ =  max_delay_ + ((1 - forgetfulness_) * avg_slack_ + forgetfulness_ * drop_next_);
+    // reset drop_next_ to zero after calculating slack
+    //   does not affect CoDel at all - drop_next_ is temporally local to when it used and is recalculated each CoDel round
     drop_next_ = 0;
 }
 
@@ -128,7 +143,9 @@ dodequeResult LSTFCoDelQueue::dodeque()
     double now = Scheduler::instance().clock();
     dodequeResult r = { NULL, 0 };
 
+    // get_packet grabs the first packet from the multimap (the packet with least slack time)
     r.p = get_packet();
+    // remove searches the backing FIFO queue and removes the packet in place (if it is found, if not this triggers an error and abort() call)
     q_->remove(r.p);
     
     if (r.p == NULL) {
@@ -140,6 +157,7 @@ dodequeResult LSTFCoDelQueue::dodeque()
         // diagnostics and analysis.  d_exp_ is the sojourn time and curq_ is
         // the current q size in bytes.
         d_exp_ = now - HDR_CMN(r.p)->ts_;
+        // check if we need to update the max observed delay
         if (d_exp_ > max_delay_) {
             max_delay_ = d_exp_;
         }
@@ -177,13 +195,17 @@ dodequeResult LSTFCoDelQueue::dodeque()
 
 Packet* LSTFCoDelQueue::deque()
 {
-    // Had to put this in because NS requests a packet when the queue is empty?? Why??? -- Christen
+    // The guard here is to ensure whatever touches this queue does not trigger an abort from the call to q_->remove above in dodeque()
     if (length() == 0) {
         return 0;
     }
     
-    // amortize max delay
+    // max_delay is amortized because congestion is a temporal issue
+    //  it comes and goes
+    // amortizing max_delay account for periodic bursts of heavy traffic -> which causes long queueing delays
     max_delay_ = max_delay_ * 0.925;
+
+    // the rest of this is the normal CoDel AQM algorithm
 
     double now = Scheduler::instance().clock();;
     dodequeResult r = dodeque();
@@ -250,6 +272,7 @@ Packet* LSTFCoDelQueue::deque()
     return (r.p);
 }
 
+// NS-2 specific method for capturing TCL commands and translating them to the appropriate C++ commands
 int LSTFCoDelQueue::command(int argc, const char*const* argv)
 {
     Tcl& tcl = Tcl::instance();
@@ -291,6 +314,8 @@ LSTFCoDelQueue::trace(TracedVar* v)
 {
     const char *p;
 
+    // should I add an additional traced variable here, perhaps for the slack time?
+    // last time I did NS kept segfaulting
     if (((p = strstr(v->name(), "curq")) == NULL) &&
         ((p = strstr(v->name(), "d_exp")) == NULL) ) {
         fprintf(stderr, "CoDel: unknown trace var %s\n", v->name());
