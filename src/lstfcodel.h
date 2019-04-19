@@ -44,6 +44,7 @@
 
 using std::multimap;
 using std::pair;
+using std::prev;
 
 // we need a multi-valued return and C doesn't want to do help
 struct dodequeResult { Packet* p; int ok_to_drop; };
@@ -96,9 +97,18 @@ class LSTFCoDelQueue : public Queue {
     dodequeResult dodeque();
     Packet* get_packet() {
         if (sched_.size() > 0) {
-            Packet* pkt = (*sched_.begin()).second;
-            sched_.erase(sched_.begin());
-            return pkt;
+            // deque from the end of the priority queue if in dropping state
+            if (dropping_ == 1) {
+                Packet* pkt = (*prev(sched_.end())).second;
+                sched_.erase(prev(sched_.end()));
+                return pkt;
+            }
+            // otherwise deque normally
+            else {
+                Packet* pkt = (*sched_.begin()).second;
+                sched_.erase(sched_.begin());
+                return pkt;
+            }
         }
         return 0;
     }
