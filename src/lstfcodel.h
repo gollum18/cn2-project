@@ -72,8 +72,7 @@ class LSTFCoDelQueue : public Queue {
     int maxpacket_;         // largest packet we've seen so far (this should be
                             // the link's MTU but that's not available in NS)
                             
-    double avg_slack_;
-    double max_delay_;
+    double max_delay_;      // the max delay seen so far (amortized)
     multimap<double, Packet*> sched_;
 
     // NS-specific junk
@@ -85,6 +84,8 @@ class LSTFCoDelQueue : public Queue {
     Tcl_Channel tchan_;     // place to write trace records
     TracedInt curq_;        // current qlen seen by arrivals
     TracedDouble d_exp_;    // delay seen by most recently dequeued packet
+    
+    TracedDouble slack_;    // slack seen by the most recent packet
 
   private:
     void add_packet(double pri, Packet* pkt) {

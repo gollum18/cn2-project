@@ -64,6 +64,7 @@ LSTFCoDelQueue::LSTFCoDelQueue() : tchan_(0)
     bind("target_", &target_);  // target min delay in clock ticks
     bind("curq_", &curq_);      // current queue size in bytes
     bind("d_exp_", &d_exp_);    // current delay experienced in clock ticks
+    bind("slack_", &slack_);    // current slack value 
     q_ = new PacketQueue();     // underlying queue
     pq_ = q_;
     reset();
@@ -72,9 +73,10 @@ LSTFCoDelQueue::LSTFCoDelQueue() : tchan_(0)
 void LSTFCoDelQueue::reset()
 {
     // initialize average slack to CoDels interval, not sure if this is what we want, but it seems to be working ok
-    avg_slack_ = interval_;
+    slack_ = interval_;
     curq_ = 0;
     d_exp_ = 0.;
+    slack_ = 0.;
     dropping_ = 0;
     first_above_time_ = 0;
     maxpacket_ = 256;
@@ -119,10 +121,10 @@ double LSTFCoDelQueue::control_law(double t)
 double LSTFCoDelQueue::priority()
 {   
     // determine a packets priority in the queue per my paper
-    if (avg_slack_ == 0) {
+    if (slack_ == 0) {
         return 0;
     } else {
-        return 1.0 / (1.0 + avg_slack_);
+        return 1.0 / (1.0 + slack_);
     }
 }
 
@@ -130,7 +132,7 @@ double LSTFCoDelQueue::priority()
 void LSTFCoDelQueue::update_slack()
 {
     // calculate the average slack value as stated in my paper
-    avg_slack_ =  max_delay_ + ((1 - forgetfulness_) * avg_slack_ + forgetfulness_ * drop_next_);
+    slack_ =  max_delay_ + ((1 - forgetfulness_) * slack_ + forgetfulness_ * drop_next_);
     // reset drop_next_ to zero after calculating slack
     //   does not affect CoDel at all - drop_next_ is temporally local to when it used and is recalculated each CoDel round
     drop_next_ = 0;
@@ -316,7 +318,8 @@ LSTFCoDelQueue::trace(TracedVar* v)
 
     // should I add an additional traced variable here, perhaps for the slack time?
     // last time I did NS kept segfaulting
-    if (((p = strstr(v->name(), "curq")) == NULL) &&
+    if (((p = strstr(v->name(), "slack")) == NULL) &&
+        ((p = strstr(v->name(), "curq")) == NULL) &&
         ((p = strstr(v->name(), "d_exp")) == NULL) ) {
         fprintf(stderr, "CoDel: unknown trace var %s\n", v->name());
         return;
