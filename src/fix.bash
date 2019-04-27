@@ -1,7 +1,20 @@
 #! /bin/bash
 # cleans the trace files of the last line
 #   this line is corrupted because of halting on Linux Ryzen systems
-for file in $(ls -p ./var | grep -v /); do
-    echo "Processing file $file..."
-    sed '$d' "./var/$file" > "./var/fixed/$file"
-done
+
+function fix_file () {
+    # $1 = the directory
+    # $2 = the file
+    echo "Processing file $2..."
+    sed '$d' "$1$2" > "./var/fixed/$2"
+}
+
+function fix_files_in_dir () {
+    # $1 = the directory
+    for file in $(ls -p $1 | grep -v /); do
+        fix_file $1 $file
+    done
+}
+
+fix_file ./var/slack/ lstf_75_slack.tr
+fix_file ./var/slack/ lstf_875_slack.tr
