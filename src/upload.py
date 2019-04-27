@@ -54,7 +54,8 @@ def get_desc_files(root, ext):
             if not filenames:
                 continue
             for filename in filenames:
-                files.append(os.path.join(dirpath, filename))
+                if filename.endswith(ext):
+                    files.append(os.path.join(dirpath, filename))
     except IOError as e:
         usage(e)
         sys.exit(-1)
@@ -64,12 +65,7 @@ def upload(db, coll, files):
     '''
     Uploads the trace files pointed to by [files] to MongoDB running on local host.
     '''
-    # check if there are any files, tell user and do not continue if so
-    if not files:
-        print('No files found in \'{0}\' with extension \'{1}\'!'.format(root, ext))
-        sys.exit(0)
     # print the users retrieved files
-    print('Found these files in \'{0}\' with extension \'{1}\':'.format(root, ext))
     print(files)
     # ask them if they want to upload them
     if input('Are these the trace files you want to upload to MongoDB? [y|n]: ').lower() == 'n':
@@ -83,13 +79,13 @@ def upload(db, coll, files):
     for f in files:
         filename = extract_filename(f)
         try:
-            with open(filename) as content:
-                # insert 100 documents at a time, their small so this is fine
-                if len(documents) == 100:
-                    coll.insert_many(documents)
-                    documents.clear()
-                # build the 
+            with open(f) as content:
+                # build the document
                 for line in content:
+                    # insert 100 documents at a time, their small so this is fine
+                    if len(documents) == 100:
+                        coll.insert_many(documents)
+                        documents.clear()
                     parts = line.split(' ')
                     if len(parts) == len(_trace_all):
                         keys = _trace_all
@@ -103,7 +99,7 @@ def upload(db, coll, files):
                     document = dict()
                     document['file'] = filename
                     for i in range(len(keys)):
-                        document[keys[i]] = parts[i]
+                        document[keys[i]] = parts[i].replace('\n', '')
                     documents.append(document)
             # upload any residual documents too
             if len(documents) > 0:
@@ -153,6 +149,11 @@ def main():
     except ValueError as e:
         usage(e)
         sys.exit(-1)
+    # check if there are any files, tell user and do not continue if so
+    if not files:
+        print('No files found in \'{0}\' with extension \'{1}\'!'.format(root, ext))
+        sys.exit(0)
+    print('Found these files in \'{0}\' with extension \'{1}\':'.format(root, ext))
     # upload the files to MongoDB
     upload(db, coll, files)
     
