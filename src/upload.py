@@ -95,7 +95,7 @@ def upload(db, coll, files):
                         keys = _trace_all
                     elif len(parts) == len(_trace_queue):
                         keys = _trace_queue
-                    elif len(parts == len(_trace_var):
+                    elif len(parts) == len(_trace_var):
                         keys = _trace_var
                     else:
                         raise IOError
