@@ -16,5 +16,4 @@ function fix_files_in_dir () {
     done
 }
 
-fix_file ./var/slack/ lstf_75_slack.tr
-fix_file ./var/slack/ lstf_875_slack.tr
+# TODO: Take user input and check it
