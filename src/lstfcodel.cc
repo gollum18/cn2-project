@@ -132,10 +132,7 @@ double LSTFCoDelQueue::priority()
 void LSTFCoDelQueue::update_slack()
 {
     // calculate the average slack value as stated in my paper
-    slack_ =  max_delay_ + ((1 - forgetfulness_) * slack_ + forgetfulness_ * drop_next_);
-    // reset drop_next_ to zero after calculating slack
-    //   does not affect CoDel at all - drop_next_ is temporally local to when it used and is recalculated each CoDel round
-    drop_next_ = 0;
+    slack_ = (1 - forgetfulness_) * slack_ + forgetfulness_ * d_exp_;
 }
 
 // Internal routine to dequeue a packet. All the delay and min tracking
@@ -159,10 +156,6 @@ dodequeResult LSTFCoDelQueue::dodeque()
         // diagnostics and analysis.  d_exp_ is the sojourn time and curq_ is
         // the current q size in bytes.
         d_exp_ = now - HDR_CMN(r.p)->ts_;
-        // check if we need to update the max observed delay
-        if (d_exp_ > max_delay_) {
-            max_delay_ = d_exp_;
-        }
         curq_ = q_->byteLength();
 
         if (maxpacket_ < HDR_CMN(r.p)->size_)
@@ -201,11 +194,6 @@ Packet* LSTFCoDelQueue::deque()
     if (length() == 0) {
         return 0;
     }
-    
-    // max_delay is amortized because congestion is a temporal issue
-    //  it comes and goes
-    // amortizing max_delay account for periodic bursts of heavy traffic -> which causes long queueing delays
-    max_delay_ = max_delay_ * 0.925;
 
     // the rest of this is the normal CoDel AQM algorithm
 
