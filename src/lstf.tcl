@@ -124,10 +124,10 @@ set sink [new Agent/TCPSink]
 set null [new Agent/Null]
 
 # attach the agents to the nodes
-$ns attach-agent $a $tcp
-$ns attach-agent $b $udp
-$ns attach-agent $d $sink
-$ns attach-agent $d $null
+$ns attach-agent $client_a $tcp
+$ns attach-agent $client_b $udp
+$ns attach-agent $server_a $sink
+$ns attach-agent $server_a $null
 
 # connect the agents and the sinks
 $ns connect $tcp $sink
@@ -145,7 +145,7 @@ $cbr attach-agent $udp
 $ns at 0 "$ftp start"
 $ns at 0 "$cbr start"
 
-# schedule finish at 7 days sim time
+# schedule finish at variable sim time
 $ns at $run_time "finish"
 
 # run the simulation
