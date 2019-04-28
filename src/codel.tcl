@@ -1,31 +1,31 @@
-# Name: lstf.tcl
-# Since: ~04/12/2019, I forgot the exact date
+# Name: codel.tcl
+# Since: 04/28/2019
 # Author: Christen Ford <c.t.ford@vikes.csuohio.edu>
-# Purpose: This simulation is meant to 'stress' lstf-codel just enough to produce analyzable output
+# Purpose: This simulation is meant to 'stress' codel just enough to produce analyzable output
+
+# NOTE: This is a modified version of lstf.codel, I may eventually merge the two into one file
 
 # I originally intended to stress CoDel's mechanisms to the point where packets were forced to drop, but then I remembered CoDel uses AQM based on queuing delay so forcing packet drops is largely unnecessary
 
 # Switched '<' tp '!=', what was I thinking?? hah
-if {$argc != 2} {
-    puts "Usage: ns lstf.tcl \[forgetfulness\] \[run time (s)\]"
+if {$argc != 1} {
+    puts "Usage: ns codel.tcl \[run time (s)\]"
     exit -1
 }
 
-# Please don't switch these up, it will cause massive errors otherwise
-set forgetfulness [lindex $argv 0]
-set run_time [lindex $argv 1]
+# get the run time
+set run_time [lindex $argv 0]
 
 # create a new simulator object
 set ns [new Simulator]
 
 # define a finish proc
 proc finish {} {
-    global ns nf trq trd trs
+    global ns nf trq trd
     $ns flush-trace
     close $nf
     close $trq
     close $trd
-    close $trs
     # leave this guy in, for longer simulations, this provides necessary feedback to let the user know the simulation is done
     puts "Simulation complete..."
     exit 0
@@ -38,8 +38,7 @@ proc finish {} {
 file mkdir "out"
 
 # open the output file
-set fpart [string replace $forgetfulness 0 1 ""]
-set nf [open [format "out/lstf_%d.tr" $fpart run_time] w]
+set nf [open "out/codel.tr" w]
 
 # refer to my paper on LSTFCoDel, these names come from the topology specified there
 set client_a [$ns node]
@@ -53,23 +52,18 @@ set server_a [$ns node]
 # configure LSTFCoDel
 # these parameters are recommended by RFC 8289: CoDel
 #   they are recommended best parameters for Earth-bound networks
-Queue/LSTFCoDel set interval_ 100
-Queue/LSTFCoDel set target_ 5
-
-# forgetfulness must be between 0 and 1 - I have tested it with increments of 0.125 in the range of (0, 1)
-# note 0 and 1 were not tested and I have no intention of doing so
-Queue/LSTFCoDel set forgetfulness_ $forgetfulness
+Queue/CoDel set interval_ 100
+Queue/CoDel set target_ 5
 
 # initialize the traced variables
 #   apparently for traced variables this is necessary, otherwise ns2 throws some warnings around for no reason
-Queue/LSTFCoDel set curq_ 0
-Queue/LSTFCoDel set d_exp_ 0.0
-Queue/LSTFCoDel set slack_ 0.0
+Queue/CoDel set curq_ 0
+Queue/CoDel set d_exp_ 0.0
 
 # create the links between the nodes
 $ns duplex-link $client_a $router_a 2Mb 25ms DropTail
 $ns duplex-link $client_b $router_a 1.5Mb 25ms DropTail
-$ns duplex-link $router_a $server_a 1.7Mb 50ms LSTFCoDel
+$ns duplex-link $router_a $server_a 1.7Mb 50ms CoDel
 
 # set a queue size of 32 for the LSTFCoDel link
 $ns queue-limit $router_a $server_a 32
@@ -87,27 +81,20 @@ file mkdir "var"
 # make the necessary output files
 file mkdir "var/curq"
 file mkdir "var/dexp"
-file mkdir "var/slack"
 
 # ahhhh, the specific format for these trace commands was also hard to find - NS2 docs are lacking, as are online resources
 
 # trace current queue length
 set curqtracer [new Trace/Var] 
-set trq [open [format "var/curq/lstf_%d_curq.tr" $fpart run_time] w]
+set trq [open "var/curq/codel_curq.tr" w]
 $curqtracer attach $trq 
 $lclink trace curq_ $curqtracer
 
 # trace current delay experienced
 set dexptracer [new Trace/Var]
-set trd [open [format "var/dexp/lstf_%d_dexp.tr" $fpart run_time] w]
+set trd [open "var/dexp/codel_dexp.tr" w]
 $dexptracer attach $trd 
 $lclink trace d_exp_ $dexptracer
-
-# trace current slack time
-set slacktrace [new Trace/Var]
-set trs [open [format "var/slack/lstf_%d_slack.tr" $fpart run_time] w]
-$slacktrace attach $trs
-$lclink trace slack_ $slacktrace
 
 # create some agents
 set tcp [new Agent/TCP]
