@@ -1,2 +1,4 @@
-# ignore the out folder
+# ignore the output folders
 out/
+graph/
+var/
