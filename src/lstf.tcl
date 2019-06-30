@@ -117,7 +117,7 @@ $tcp set packetSize_ 1500
 # create a UDP agent
 set udp [new Agent/UDP]
 # set packet size to Ethernet
-$udp set packetSize_ 1000
+$udp set packetSize_ 1500
 
 # create the tcp sink and udp null sink (although it can be used with tcp agents too!) 
 set sink [new Agent/TCPSink]
